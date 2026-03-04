@@ -1,8 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-use std::fmt::{Display, Formatter};
 use const_oid::ObjectIdentifier;
-
+use std::fmt::{Display, Formatter};
 
 pub const OID_SM3: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.156.10197.1.401");
 
@@ -39,20 +38,27 @@ pub(crate) const T00: u32 = 0x79cc4519;
 // 16 ≤ j ≤ 63
 pub(crate) const T16: u32 = 0x7a879d8a;
 
+// 初始值，用于确定压缩函数寄存器的初态
 pub(crate) static IV: [u32; 8] = [
     0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e,
 ];
 
+/// 压缩函数中的置换函数
+///
 /// P0(X) = X ⊕ (X ≪ 9) ⊕ (X ≪ 17)
 fn p0(x: u32) -> u32 {
     x ^ x.rotate_left(9) ^ x.rotate_left(17)
 }
 
+/// 消息扩展中的置换函数
+///
 /// P1(X) = X ⊕ (X ≪ 15) ⊕ (X ≪ 23)
 fn p1(x: u32) -> u32 {
     x ^ x.rotate_left(15) ^ x.rotate_left(23)
 }
 
+///
+/// 布尔函数，随j的变化取不同的表达式
 fn ff(x: u32, y: u32, z: u32, j: u32) -> u32 {
     if j <= 15 {
         return x ^ y ^ z;
@@ -62,6 +68,7 @@ fn ff(x: u32, y: u32, z: u32, j: u32) -> u32 {
     0
 }
 
+/// 布尔函数，随j的变化取不同的表达式
 fn gg(x: u32, y: u32, z: u32, j: u32) -> u32 {
     if j <= 15 {
         return x ^ y ^ z;
@@ -71,6 +78,7 @@ fn gg(x: u32, y: u32, z: u32, j: u32) -> u32 {
     0
 }
 
+/// 常量，随j的变化取不同的值
 fn t(j: usize) -> u32 {
     if j <= 15 {
         return T00;
@@ -114,8 +122,9 @@ pub fn sm3_hash(msg: &[u8]) -> [u8; 32] {
     output
 }
 
+/// 压缩函数
 fn cf(v_i: &mut [u32; 8], b_i: [u8; 64]) {
-    // expend msg
+    // 将消息分组B(i)按以下方法扩展生成132个字W0, W1, · · · , W67, W0′, W1′, · · · , W63′ ，用于压缩函数CF
     let mut w: [u32; 68] = [0; 68];
     let mut w1: [u32; 64] = [0; 64];
 
@@ -145,6 +154,7 @@ fn cf(v_i: &mut [u32; 8], b_i: [u8; 64]) {
         j += 1;
     }
 
+    // 令A,B,C,D,E,F,G,H为字寄存器,SS1,SS2,TT1,TT2为中间变量,压缩函数Vi+1 = CF(V(i), B(i)), 0 ≤ i ≤ n−1
     let mut a = v_i[0];
     let mut b = v_i[1];
     let mut c = v_i[2];
@@ -189,21 +199,23 @@ fn cf(v_i: &mut [u32; 8], b_i: [u8; 64]) {
 }
 
 fn pad(msg: &[u8]) -> Result<Vec<u8>, Sm3Error> {
+    // 0. 计算出原始消息的bit长度
     let bit_length = (msg.len() << 3) as u64;
     let mut msg = msg.to_vec();
+    // 1. 在消息末尾添加一个比特'1'，即字节0x80。
     msg.push(0x80);
+
+    // 2. 再添加k 个“0”，k是满足l + 1 + k ≡ 448mod512 的最小的非负整数
+    //    使得填充后的长度模512等于448（即56字节）。
     let blocksize = 64;
     while msg.len() % blocksize != 56 {
         msg.push(0x00);
     }
-    msg.push((bit_length >> 56 & 0xff) as u8);
-    msg.push((bit_length >> 48 & 0xff) as u8);
-    msg.push((bit_length >> 40 & 0xff) as u8);
-    msg.push((bit_length >> 32 & 0xff) as u8);
-    msg.push((bit_length >> 24 & 0xff) as u8);
-    msg.push((bit_length >> 16 & 0xff) as u8);
-    msg.push((bit_length >> 8 & 0xff) as u8);
-    msg.push((bit_length & 0xff) as u8);
+
+    // 3. 将原始消息长度（比特数）用64位大端整数附加在末尾
+    msg.extend_from_slice(&bit_length.to_be_bytes());
+
+    // 4. 填充后的消息m′ 的比特长度为512 (64字节) 的倍数。
     if msg.len() % 64 != 0 {
         return Err(Sm3Error::ErrorMsgLen);
     }
